@@ -110,7 +110,7 @@ class StreamFreecam(object):
         self.cmdFling(p, [0.0, 1000.0, 0.0], False)
 
 
-    def cmdFling(self, player, new_pos, relative):
+    def moveDeadPlayer(self, player, new_pos, relative):
         """fling a player high.
 
         cmd = playerid height
@@ -118,27 +118,7 @@ class StreamFreecam(object):
         Taken from mm_bf2cc.py.
         """
 
-        # parts = cmd.split()
-        # l = len(parts)
-        # if 0 == l:
-        #     ctx.write('Error: no playerid specified\n')
-        #     return 0
-        # elif 1 == l:
-        #     ctx.write('Error: no height specified\n')
-        #     return 0
-        #
-        # playerid = mm_utils.get_int(ctx, parts[0], 'playerid')
-        # if playerid is None:
-        #     return 0
-        #
-        # height = mm_utils.get_int(ctx, parts[1], 'height')
-        # if height is None:
-        #     return 0
-        #
-        # player = bf2.playerManager.getPlayerByIndex(playerid)
-
         if not player or player.isAlive():
-            #  or player.isManDown()
             self.mm.info('Error: Player is currently alive')
             return 0
         try:
@@ -147,7 +127,7 @@ class StreamFreecam(object):
             self.mm.error("Failed to check player name", True)
 
         if player_name.startswith(self.__config['streamerPrefix']):
-            self.mm.info("Ignoring streamer player %s" % player_name)
+            # self.mm.info("Ignoring streamer player %s" % player_name)
             return 0
 
         try:
@@ -158,14 +138,14 @@ class StreamFreecam(object):
                 veh.setPosition(tuple([pos[0] + new_pos[0], pos[1] + new_pos[1], pos[2] + new_pos[2]]))
             else:
                 new_pos_tuple = tuple(new_pos)
-                self.mm.info('checking last pos %s' % str(pos))
+                # self.mm.info('checking last pos %s' % str(pos))
                 if pos == new_pos_tuple:
-                    self.mm.info('same pos, ignoring')
+                    # self.mm.info('same pos, ignoring')
                     return 0
                 veh.setPosition(new_pos_tuple)
-            self.mm.info("Tried to move player'%s' isManDown %s" % (player_name, player.isAlive()))
+            # self.mm.info("Tried to move player'%s' isManDown %s" % (player_name, player.isManDown()))
         except Exception, e:
-            self.mm.error('Failed to fling player v2', True)
+            self.mm.error('Failed to move player', True)
 
     def checkPlayers(self, params=None):
         """Check players for ping violations and update advanced player info"""
@@ -177,14 +157,14 @@ class StreamFreecam(object):
             for player in bf2.playerManager.getPlayers():
                 try:
                     if not player.isConnected():
-                        # Players still connecting ignore
+                        # ignore players still connecting
                         continue
 
                     if not player or player.isAlive():
                         # ignore alive players
                         continue
 
-                    self.cmdFling(player, [0.0, 1000.0, 0.0], False)
+                    self.moveDeadPlayer(player, [0.0, 1000.0, 0.0], False)
                 except:
                     try:
                         player_name = player.getName()
@@ -193,8 +173,6 @@ class StreamFreecam(object):
                     self.mm.error( "Failed to check player '%s'" % player_name, True )
         except:
             self.mm.error( "Ooops :(", True )
-
-    # Put your actions here
 
     def init(self):
         """Provides default initialisation."""
