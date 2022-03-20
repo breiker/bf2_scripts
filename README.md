@@ -1,4 +1,4 @@
-##Stream freecam
+## Stream freecam
 File: `admin/modules/mm_stream_freecam.py`
 
 Battlefield 2 doesn't have full spectator mode. You can only spectate players using third-person view or using freecam.
