@@ -54,11 +54,10 @@ Author: Michal 'Breiker' Breiter
 
 import bf2
 import host
-import math
 import mm_utils
 
 # Set the version of your module here
-__version__ = 1.0
+__version__ = 0.7
 
 # Set the required module versions here
 __required_modules__ = {
@@ -82,7 +81,7 @@ configDefaults = {
     'initDelay': 10,
     # assume every setting is int
     'changedVariables': {
-        'sv.spawnTime': 2,
+        'sv.spawnTime': 1,
         'sv.soldierFriendlyFire': 2,
         'sv.manDownTime': 0,
         'sv.timeBeforeRestartMap': 5,
@@ -96,10 +95,10 @@ configDefaults = {
 }
 
 # TODO
-# - fix team assignment
+# - fix team assignment - comment in onPlayerChangeTeams
 # - add more pos
 # - block flags
-# - fast live after round?
+# - fast live after live round?
 
 class Warmup(object):
     class PlayerState(object):
@@ -117,12 +116,16 @@ class Warmup(object):
             self.team = team
             self.name = name
             self.ready = self.NOT_READY
+            self.times_spawned = 0
 
         # Python support here is challenging
         def string(ps):
             return Warmup.PlayerState.strings[ps]
 
         string = staticmethod(string)
+
+        def resetAfterRound(self):
+            self.times_spawned = 0
 
     class RoundState(object):
         UNKNOWN = 0
@@ -177,6 +180,26 @@ class Warmup(object):
         self.team2_name = 'MEC'
 
         self.fake_restarts = 0
+
+        self.current_map = ''
+        self.current_spawn = 0
+        self.spawns = {
+            'strike_at_karkand': [
+                ((-186.0, 156.0, 44.0), (162.0, 0.0, 0.0)),  # square to hotel corridor facing south
+                ((-168.0, 156.0, 35.0), (-175.0, 0.0, 0.0)),  # square to hotel east main arches
+                ((-139.0, 156.0, 28.0), (-118.0, 0.0, 0.0)),  # east east, hotel north spawn height
+                ((-140.0, 156.0, 1.0), (-68.0, 0.0, 0.0)),  # east east, south spawn height
+                ((-144.0, 156.0, -18.0), (-112.0, 0.0, 0.0)),  # east east, first corridor from us hill
+                ((-178.0, 156.0, -26.0), (-94.0, 0.0, 0.0)),  # chicken coup
+                ((-178.0, 156.0, -12.0), (-91.0, 0.0, 0.0)),  # box by south roof
+                ((-211.0, 156.0, -37.0), (-3.0, 0.0, 0.0)),  # barricates south of burning car
+                ((-226.0, 156.0, -21.0), (41.0, 0.0, 0.0)),  # burning car
+                ((-229.0, 156.0, -7.0), (-86.0, 0.0, 0.0)),  # back of lmg spawn hotel
+                ((-249.0, 156.0, 17.0), (45.0, 0.0, 0.0)),  # fence by arch hotel
+                ((-253.0, 156.0, 34.0), (104.0, 0.0, 0.0)),  # tree north west hotel by telephone booth
+                ((-225.0, 156.0, 65.0), (121.0, 0.0, 0.0)),  # south of north hotel phone booth
+            ]
+        }
 
     def cmdExec(self, ctx, cmd):
         return mm_utils.exec_subcmd(self.mm, self.__cmds, ctx, cmd)
@@ -235,16 +258,27 @@ class Warmup(object):
         self.restoreSettings()
         self.restartMap()
         self.round_state = Warmup.RoundState.NEXT_LIVE
-        self.mm.info('[WARMUP] switchToLive reset to not ready')
-        for _, state in self.player_state.iteritems():
-            if state.ready == Warmup.PlayerState.READY:
-                state.ready = Warmup.PlayerState.NOT_READY
 
-    def updatePlayerTeams(self):
+    def updatePlayersTeams(self):
         players = bf2.playerManager.getPlayers()
         for player in players:
             self.mm.info('[WARMUP] updatePlayerTeams P(%s) T(%s)' % (player.index, player.getTeam()))
             self.player_state[player.index].team = player.getTeam()
+
+    def fixPlayerTeam(self, player, lazy=True):
+        if lazy and self.player_state[player.index].times_spawned > 1:
+            return
+        team = player.getTeam()
+        if self.player_state[player.index].team != team:
+            self.player_state[player.index].team = team
+            self.checkState()
+
+    def resetStatsAfterRound(self, reset_ready=False):
+        for _, state in self.player_state.iteritems():
+            state.resetAfterRound()
+            if reset_ready and state.ready == Warmup.PlayerState.READY:
+                state.ready = Warmup.PlayerState.NOT_READY
+
 
     def checkState(self):
         """Check if we have enough players to change state"""
@@ -276,7 +310,7 @@ class Warmup(object):
             return
 
         # ignore too small teams
-        # Change back
+        # TODO Change back to higher number?
         if team1_ready + team2_ready < 2:
             return
 
@@ -347,7 +381,7 @@ class Warmup(object):
             self.player_state[player_index].ready = Warmup.PlayerState.STREAM
 
     def onPlayerChangeTeams(self, p, humanHasSpawned):
-        """Ensure the player isnt unbalancing the teams."""
+        """Switch team. Note that this callback is not called if player got switched with switchTeam."""
         if 1 != self.__state:
             return
 
@@ -366,15 +400,15 @@ class Warmup(object):
             # maybe we have enough now
             self.checkState()
 
-    def dumpPos(self, playerid):
+    def dumpPos(self, playerid, comment):
         try:
             player = bf2.playerManager.getPlayerByIndex(playerid)
             veh = player.getVehicle()
             pos = veh.getPosition()
             rot = veh.getRotation()
 
-            message = 'DUMP pos: \'((%s.0, %s.0, %s.0), (%s.0, %s.0, %s.0))\'' % \
-                      (int(pos[0]), int(pos[1]), int(pos[2]), int(rot[0]), int(rot[1]), int(rot[2]))
+            message = 'DUMP pos: \'((%s.0, %s.0, %s.0), (%s.0, %s, %s)), # %s\'' % \
+                      (int(pos[0]), int(pos[1]), int(pos[2]), int(rot[0]), rot[1], rot[2], comment)
             self.mm.info(message)
             return message
         except Exception, e:
@@ -395,19 +429,35 @@ class Warmup(object):
         if pure_text == "/ready" or pure_text == '/r':
             self.player_state[playerid].ready = Warmup.PlayerState.READY
             self.checkState()
+            self.printState()
         elif pure_text == "/notready" or pure_text == '/nr':
             self.player_state[playerid].ready = Warmup.PlayerState.NOT_READY
             self.checkState()
+            self.printState()
         elif pure_text == "/stream":
             self.player_state[playerid].ready = Warmup.PlayerState.STREAM
             self.checkState()
-        elif pure_text == '/mapame':
+            self.printState()
+        elif pure_text == '/mapname':
             self.mm.info('DUMP mapname: \'%s\'' % host.sgl_getMapName())
-        elif pure_text == '/pos':
-            mm_utils.msg_server(self.dumpPos(playerid))
+        elif pure_text.startswith('/pos'):
+            comment = pure_text.replace('/pos', '', 1).strip()
+            mm_utils.msg_server(self.dumpPos(playerid, comment))
         elif pure_text == '/disable':
-            self.switchToLive()
-            self.module_enabled = False
+            if self.module_enabled:
+                self.switchToLive()
+                self.module_enabled = False
+        elif pure_text == '/help':
+            self.mm.info("%s commands: [/ready; /r; /notready; /nr; /stream]" % __description__)
+            self.mm.info("%s test commands: [/pos <description> - report position to add; /disable - disable module]" % __description__)
+        elif pure_text == '/set_pos':
+            if self.module_enabled and self.round_state == Warmup.RoundState.WARMUP:
+                self.changePos(playerid)
+
+    #def onPlayerChangeWeapon(self, player, oldWeapon, newWeapon):
+        # # only on spawn changes from none to something
+        # if oldWeapon:
+        #     return
 
     def onPlayerSpawn(self, player, soldier):
         """Move player."""
@@ -416,7 +466,7 @@ class Warmup(object):
 
         self.mm.info('[WARMUP] onPlayerSpawn')
 
-        if self.round_state != Warmup.RoundState.WARMUP:
+        if self.round_state != Warmup.RoundState.WARMUP or not self.module_enabled:
             return 0
 
         # not sure if it's needed
@@ -425,19 +475,47 @@ class Warmup(object):
             self.mm.info('Error: Player spawned but is None')
             return 0
 
+        self.player_state[player.index].times_spawned += 1
+        # see comments in onPlayerChangeTeams
+        self.fixPlayerTeam(player)
+
         try:
             veh = player.getVehicle()
-            pos = veh.getPosition()
-            rot = veh.getRotation()
+            # determine position to spawn
+            if self.spawns.has_key(self.current_map):
+                self.current_spawn = (self.current_spawn + 1) % len(self.spawns[self.current_map])
+                (new_pos_tuple, new_rot_tuple) = self.spawns[self.current_map][self.current_spawn]
+                new_pos_tuple = (new_pos_tuple[0], new_pos_tuple[1], new_pos_tuple[2])
+                new_rot_tuple = (new_rot_tuple[2], new_rot_tuple[1], -new_rot_tuple[0])
+                # new_rot_tuple = (30.0, 90.0, 0.0)
+            else:
+                pos = veh.getPosition()
+                rot = veh.getRotation()
+                new_pos_tuple = (pos[0], pos[1] + 3, pos[2])
+                new_rot_tuple = (0.0, -90.0, 0.0)
+                self.mm.info('rel checking last pos: %s rot: %s' % (pos, rot))
 
-            self.mm.info('rel checking last pos: %s rot: %s' % (pos, rot))
-            new_pos_tuple = (pos[0], pos[1] + 5, pos[2])
-            new_rot_tuple = (0.0, -90.0, 0.0)
-            veh.setRotation(new_rot_tuple)
             veh.setPosition(new_pos_tuple)
+            veh.setRotation(new_rot_tuple)
             self.mm.info("Tried to move player'%s' isManDown %s" % (player.index, player.isManDown()))
         except Exception, e:
             self.mm.error('Failed to move player', True)
+
+    def changePos(self, playerid):
+        try:
+            player = bf2.playerManager.getPlayerByIndex(playerid)
+            veh = player.getVehicle()
+            pos = veh.getRotation()
+            rot = veh.getRotation()
+            veh.setRotation((30.0, 90.0, 10.0))
+
+            message = 'DUMP pos: \'((%s.0, %s.0, %s.0), (%s.0, %s, %s)), # %s\'' % \
+                      (int(pos[0]), int(pos[1]), int(pos[2]), int(rot[0]), rot[1], rot[2], '')
+            self.mm.info(message)
+            return message
+        except Exception, e:
+            self.mm.error('Failed to get player pos', True)
+
 
     def onGameStatusChanged(self, status):
         """Update settings which depend on map and server settings."""
@@ -483,12 +561,18 @@ class Warmup(object):
                 self.switchToWarmup()
 
             # update team names
-            self.team1_name = host.sgl_getParam('teamName', 1, 0)
-            self.team2_name = host.sgl_getParam('teamName', 2, 0)
+            map_now = host.sgl_getMapName()
+            if self.current_map != map_now:
+                self.team1_name = host.sgl_getParam('teamName', 1, 0)
+                self.team2_name = host.sgl_getParam('teamName', 2, 0)
+            self.current_map = map_now
+
+            # refresh stats
+            self.resetStatsAfterRound(reset_ready=(self.round_state == Warmup.RoundState.LIVE))
 
             # update teams after connect
             # TODO make it better
-            self.updatePlayerTeams()
+            self.updatePlayersTeams()
         except:
             self.mm.error("% Got exception" % __description__, True)
 
@@ -522,6 +606,7 @@ class Warmup(object):
             host.registerHandler('PlayerDisconnect', self.onPlayerDisconnect, 1)
             host.registerHandler('PlayerSpawn', self.onPlayerSpawn, 1)
             host.registerHandler('ChatMessage', self.onChatMessage, 1)
+            # host.registerHandler('PlayerChangeWeapon', self.onPlayerChangeWeapon)
 
         # Register our base handlers
         host.registerGameStatusHandler(self.onGameStatusChanged)
