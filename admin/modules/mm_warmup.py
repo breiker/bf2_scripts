@@ -182,7 +182,7 @@ class Warmup(object):
         self.fake_restarts = 0
 
         self.current_map = ''
-        self.current_spawn = 0
+        self.current_spawn = [-1, -1]
         self.spawns = {
             'strike_at_karkand': [
                 ((-186.0, 156.0, 44.0), (162.0, 0.0, 0.0)),  # square to hotel corridor facing south
@@ -279,6 +279,13 @@ class Warmup(object):
             if reset_ready and state.ready == Warmup.PlayerState.READY:
                 state.ready = Warmup.PlayerState.NOT_READY
 
+        if self.spawns.has_key(self.current_map):
+            self.current_spawn[0] = 0
+            self.current_spawn[1] = len(self.spawns[self.current_map]) / 2
+        else:
+            self.current_spawn = [-1, -1]
+
+
 
     def checkState(self):
         """Check if we have enough players to change state"""
@@ -332,8 +339,8 @@ class Warmup(object):
         if self.round_state == Warmup.RoundState.LIVE:
             return
         try:
-            format_team = "Team %s: R(%s) NR(%s)"
-            format_game = "Game State: %s STREAM(%s) Commands: [/ready, /notready, /disable]"
+            format_team = "Team %s: R(%s) NR(%s) %s"
+            format_game = "Game State: %s STREAM(%s) Commands: [/ready, /notready, /help, /disable]"
             # I could use two dicts here, but I feel that that may be slower
             team1_nr = ""
             team1_r = ""
@@ -354,8 +361,12 @@ class Warmup(object):
                     else:
                         team2_nr += state.name + ', '
 
-            mm_utils.msg_server(format_team % (self.team1_name, team1_r, team1_nr))
-            mm_utils.msg_server(format_team % (self.team2_name, team2_r, team2_nr))
+            additional_desc = ''
+            # temporary
+            if self.current_map == 'strike_at_karkand':
+                additional_desc = 'Try to fight near hotel'
+            mm_utils.msg_server(format_team % (self.team1_name, team1_r, team1_nr, additional_desc))
+            mm_utils.msg_server(format_team % (self.team2_name, team2_r, team2_nr, ''))
             mm_utils.msg_server(format_game % (Warmup.RoundState.string(self.round_state), stream))
         except:
             self.mm.error("Got exception", True)
@@ -448,8 +459,8 @@ class Warmup(object):
                 self.switchToLive()
                 self.module_enabled = False
         elif pure_text == '/help':
-            self.mm.info("%s commands: [/ready; /r; /notready; /nr; /stream]" % __description__)
-            self.mm.info("%s test commands: [/pos <description> - report position to add; /disable - disable module]" % __description__)
+            mm_utils.msg_server("%s commands: [/ready; /r; /notready; /nr; /stream]" % __description__)
+            mm_utils.msg_server("%s test commands: [/pos <useful description> - report new position to add; /disable - disable module]" % __description__)
         elif pure_text == '/set_pos':
             if self.module_enabled and self.round_state == Warmup.RoundState.WARMUP:
                 self.changePos(playerid)
@@ -483,8 +494,9 @@ class Warmup(object):
             veh = player.getVehicle()
             # determine position to spawn
             if self.spawns.has_key(self.current_map):
-                self.current_spawn = (self.current_spawn + 1) % len(self.spawns[self.current_map])
-                (new_pos_tuple, new_rot_tuple) = self.spawns[self.current_map][self.current_spawn]
+                player_team = player.getTeam()
+                self.current_spawn[player_team - 1] = (self.current_spawn[player_team - 1] + 1) % len(self.spawns[self.current_map])
+                (new_pos_tuple, new_rot_tuple) = self.spawns[self.current_map][self.current_spawn[player_team - 1]]
                 new_pos_tuple = (new_pos_tuple[0], new_pos_tuple[1], new_pos_tuple[2])
                 new_rot_tuple = (new_rot_tuple[2], new_rot_tuple[1], -new_rot_tuple[0])
                 # new_rot_tuple = (30.0, 90.0, 0.0)
